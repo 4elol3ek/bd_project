@@ -1,52 +1,4 @@
--- Run through run_checks.sql: fixtures and helpers belong to its transaction.
-CREATE TEMP TABLE check_results (name text PRIMARY KEY) ON COMMIT DROP;
-
-CREATE FUNCTION check_that(label text, condition boolean) RETURNS void
-LANGUAGE plpgsql AS $$
-BEGIN
-  IF condition IS DISTINCT FROM true THEN
-    RAISE EXCEPTION 'FAIL: %', label;
-  END IF;
-  INSERT INTO pg_temp.check_results VALUES (label);
-  RAISE NOTICE 'PASS: %', label;
-END;
-$$;
-
-CREATE FUNCTION expect_error(
-  label text,
-  statement text,
-  expected_state text,
-  expected_constraint text DEFAULT NULL,
-  expected_column text DEFAULT NULL
-) RETURNS void LANGUAGE plpgsql AS $$
-DECLARE
-  actual_state text;
-  actual_constraint text;
-  actual_column text;
-BEGIN
-  -- The exception block rolls back the attempted statement.
-  BEGIN
-    EXECUTE statement;
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS
-      actual_state = RETURNED_SQLSTATE,
-      actual_constraint = CONSTRAINT_NAME,
-      actual_column = COLUMN_NAME;
-  END;
-
-  IF actual_state IS DISTINCT FROM expected_state
-     OR (expected_constraint IS NOT NULL
-         AND actual_constraint IS DISTINCT FROM expected_constraint)
-     OR (expected_column IS NOT NULL
-         AND actual_column IS DISTINCT FROM expected_column) THEN
-    RAISE EXCEPTION 'FAIL: %; expected SQLSTATE %, constraint %, column %; got %, %, %',
-      label, expected_state, expected_constraint, expected_column,
-      coalesce(actual_state, 'no error'), actual_constraint, actual_column;
-  END IF;
-  PERFORM check_that(label, true);
-END;
-$$;
-
+-- Focused integrity checks; run through run_checks.sql.
 SELECT check_that('12 tables have primary keys; 14 foreign keys are validated',
   (SELECT count(*) = 12 FROM pg_class
    WHERE relnamespace = current_schema()::regnamespace AND relkind = 'r')
@@ -74,11 +26,11 @@ BEGIN
   INSERT INTO category (name) VALUES ('Технологии') RETURNING id INTO v_category_id;
   INSERT INTO news_source (name, url)
     VALUES ('Тестовый источник', 'https://example.test') RETURNING id INTO v_source_id;
-  INSERT INTO news (source_id, canonical_url, title, published_at)
-    VALUES (v_source_id, 'https://example.test/news/1', 'Новость 1', now())
+  INSERT INTO news (source_id, canonical_url, title, content, published_at)
+    VALUES (v_source_id, 'https://example.test/news/1', 'Новость 1', 'Текст новости 1', now())
     RETURNING id INTO v_news_id;
-  INSERT INTO news (source_id, canonical_url, title, published_at)
-    VALUES (v_source_id, 'https://example.test/news/2', 'Новость 2', now())
+  INSERT INTO news (source_id, canonical_url, title, content, published_at)
+    VALUES (v_source_id, 'https://example.test/news/2', 'Новость 2', 'Текст новости 2', now())
     RETURNING id INTO v_other_news_id;
   INSERT INTO news_category VALUES (v_news_id, v_category_id), (v_other_news_id, v_category_id);
   INSERT INTO subscription_category VALUES (v_user_id, v_category_id);
@@ -110,8 +62,8 @@ BEGIN
       'Другой источник', 'https://example.test'), '23505', 'news_source_url_key');
 
   PERFORM expect_error('Duplicate canonical news URL is rejected',
-    format('INSERT INTO news (source_id, canonical_url, title, published_at) VALUES (%s, %L, %L, now())',
-      v_source_id, 'https://example.test/news/1', 'Дубликат'), '23505', 'news_canonical_url_key');
+    format('INSERT INTO news (source_id, canonical_url, title, content, published_at) VALUES (%s, %L, %L, %L, now())',
+      v_source_id, 'https://example.test/news/1', 'Дубликат', 'Текст дубликата'), '23505', 'news_canonical_url_key');
 
   PERFORM expect_error('Duplicate favorite is rejected by its composite key',
     format('INSERT INTO favorite VALUES (%s, %s)', v_user_id, v_news_id), '23505', 'favorite_pkey');
@@ -127,6 +79,21 @@ BEGIN
 
   PERFORM expect_error('News title cannot be NULL',
     format('UPDATE news SET title = NULL WHERE id = %s', v_news_id), '23502', NULL, 'title');
+
+  PERFORM expect_error('Saved news content cannot be NULL',
+    format('UPDATE news SET content = NULL WHERE id = %s', v_news_id), '23502', NULL, 'content');
+
+  PERFORM expect_error('News title cannot be blank',
+    format('UPDATE news SET title = %L WHERE id = %s', '   ', v_news_id),
+    '23514', 'chk_news_title_not_blank');
+
+  PERFORM expect_error('Saved news content cannot be blank',
+    format('UPDATE news SET content = %L WHERE id = %s', '', v_news_id),
+    '23514', 'chk_news_content_not_blank');
+
+  PERFORM expect_error('Canonical news URL cannot be blank',
+    format('UPDATE news SET canonical_url = %L WHERE id = %s', '', v_news_id),
+    '23514', 'chk_news_url_not_blank');
 
   PERFORM expect_error('Password hash shorter than 8 characters is rejected',
     format('UPDATE app_user SET password_hash = %L WHERE id = %s', 'short', v_user_id),

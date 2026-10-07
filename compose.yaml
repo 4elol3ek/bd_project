@@ -1,0 +1,45 @@
+name: bd-news-labs
+
+x-pg-image: &pg-image postgres:18@sha256:86c951e05bf56c93d95d397747fb8820ac76cc3bedb78f43abd83eedbe3666ae
+
+services:
+  postgres:
+    image: *pg-image
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-news_aggregator}
+      POSTGRES_USER: ${POSTGRES_USER:-news_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-news_local_password}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8
+      TZ: Asia/Novosibirsk
+    command: [postgres, -c, timezone=Asia/Novosibirsk]
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - .:/workspace:ro
+      - ./docker/00-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  checks:
+    image: *pg-image
+    profiles: [audit]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-news_aggregator}
+      PGUSER: ${POSTGRES_USER:-news_app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-news_local_password}
+    volumes:
+      - .:/workspace:ro
+    working_dir: /workspace
+    entrypoint: [psql, -X, -v, ON_ERROR_STOP=1, -f, run_checks.sql]
+
+volumes:
+  pgdata:

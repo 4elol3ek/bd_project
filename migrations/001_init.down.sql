@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS scrape_error_log;
+DROP TABLE IF EXISTS import_result;
+DROP TABLE IF EXISTS scrape_run;
+DROP TABLE IF EXISTS favorite;
+DROP TABLE IF EXISTS subscription_source;
+DROP TABLE IF EXISTS subscription_category;
+DROP TABLE IF EXISTS news_category;
+DROP TABLE IF EXISTS news;
+DROP TABLE IF EXISTS news_source;
+DROP TABLE IF EXISTS app_user;
+DROP TABLE IF EXISTS category;
+DROP TABLE IF EXISTS role;

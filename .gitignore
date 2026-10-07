@@ -6,9 +6,6 @@ __pycache__/
 .vscode/
 tmp/
 
-# Local reports, original documents and generated verification results.
 /local/
-/AUDIT_REPORT.md
 /source/
 /docs/source/
-/evidence/

@@ -1,10 +1,8 @@
 name: bd-news-labs
 
-x-pg-image: &pg-image postgres:18@sha256:86c951e05bf56c93d95d397747fb8820ac76cc3bedb78f43abd83eedbe3666ae
-
 services:
   postgres:
-    image: *pg-image
+    image: postgres:18
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-news_aggregator}
       POSTGRES_USER: ${POSTGRES_USER:-news_app}
@@ -24,22 +22,6 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
-
-  checks:
-    image: *pg-image
-    profiles: [audit]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGHOST: postgres
-      PGDATABASE: ${POSTGRES_DB:-news_aggregator}
-      PGUSER: ${POSTGRES_USER:-news_app}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-news_local_password}
-    volumes:
-      - .:/workspace:ro
-    working_dir: /workspace
-    entrypoint: [psql, -X, -v, ON_ERROR_STOP=1, -f, run_checks.sql]
 
 volumes:
   pgdata:

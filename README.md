@@ -37,6 +37,122 @@ docker compose run --rm queries
 
 Выполняет бизнес-запросы из `sql/queries/`.
 
+## Генерация данных
+
+```sh
+# Набор для разработки: схема dev, 80 000 новостей.
+sh generator/run.sh dev 42
+
+# Нагрузочный набор: схема load, 3 000 000 новостей.
+sh generator/run.sh load 42
+```
+
+Генератор принимает ровно два аргумента: `dev` или `load` и seed — целое число
+от 0 до 2147483647. Seed определяет сгенерированные значения: одинаковые режим
+и seed дают одинаковые данные.
+
+Каждый запуск удаляет выбранную схему вместе с её данными, создаёт её заново
+и заполняет все 12 таблиц. Например, повторный `sh generator/run.sh load 123`
+заменит набор в `load` данными с seed `123`. Схемы `dev` и `load` независимы;
+основная схема `public` не меняется. При ошибке загрузки прежний набор восстанавливается.
+Для `load` нужно несколько гигабайт свободного места.
+
+Сервисы `seed_only` и `queries` рассчитаны на демонстрационный набор в `public`.
+Сгенерированные наборы в `dev` и `load` можно прочитать запросами из раздела ниже.
+
+Успешный запуск заканчивается сообщением `Generation committed in schema dev`
+или `Generation committed in schema load`. Данные сохраняются в томе Docker
+после завершения генератора и перезапуска контейнера.
+
+## Посмотреть данные
+
+Открыть консоль базы:
+
+```sh
+docker compose exec postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Дальше команды выполняются внутри `psql`. Посмотреть схемы и таблицы:
+
+```sql
+\dn
+\dt dev.*
+```
+
+Проверить количество строк в наборе для разработки:
+
+```sql
+SELECT count(*) AS news_count FROM dev.news;                  -- 80 000
+SELECT count(*) AS import_count FROM dev.import_result;       -- 88 000
+```
+
+Если загружен нагрузочный набор, проверить его:
+
+```sql
+\dt load.*
+SELECT count(*) AS news_count FROM load.news;                 -- 3 000 000
+SELECT count(*) AS import_count FROM load.import_result;      -- 3 300 000
+```
+
+Выбрать схему, чтобы не писать её имя перед каждой таблицей:
+
+```sql
+SET search_path TO dev, pg_catalog;
+-- Для нагрузочного набора: SET search_path TO load, pg_catalog;
+
+SELECT id, source_id, title, published_at, left(content, 160) AS excerpt
+FROM news
+ORDER BY id
+LIMIT 10;
+
+SELECT n.id, n.title, s.name AS source, c.name AS category
+FROM news n
+JOIN news_source s ON s.id = n.source_id
+JOIN news_category nc ON nc.news_id = n.id
+JOIN category c ON c.id = nc.category_id
+ORDER BY n.id
+LIMIT 10;
+
+SELECT status, count(*) AS rows
+FROM import_result
+GROUP BY status
+ORDER BY status;
+```
+
+Выйти из консоли: `\q`.
+
+## Что хранит import_result
+
+`news` хранит сохранённые новости. `scrape_run` хранит запуски сбора новостей
+из источников, а `import_result` — результат обработки каждого полученного материала
+в рамках запуска:
+
+| Статус | Что произошло | `news_id` |
+| --- | --- | --- |
+| `успех` | Новость сохранена в `news` | ID сохранённой новости |
+| `дубликат` | Такой материал уже есть, новая новость не создаётся | `NULL` |
+| `ошибка` | Материал не удалось сохранить, например нет заголовка | `NULL` |
+
+Поэтому результатов обработки больше, чем новостей. В режиме `dev` это
+80 000 успехов + 6 400 дубликатов + 1 600 ошибок = 88 000 строк.
+Причины ошибок хранятся в `scrape_error_log`. Ошибка подключения к источнику
+записывается в `scrape_run` и журнал; результатов обработки материалов у такого
+запуска нет.
+
+## Проверить данные и проект
+
+Повторно проверить объёмы и бизнес-ограничения сгенерированного набора:
+
+```sh
+docker compose exec -T postgres sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v mode=dev -f /workspace/generator/verify.sql'
+```
+
+Для нагрузочного набора замените `-v mode=dev` на `-v mode=load`.
+Успех — сообщение `PASS: counts, classification, imports, source history, subscriptions and dates`
+и код выхода 0. Проверка также выводит объёмы, статусы и распределения.
+
+Подробные распределения данных: [generator/README.md](generator/README.md).
+
 ## Структура проекта
 
 | Путь | Содержимое |
@@ -49,6 +165,7 @@ docker compose run --rm queries
 | `sql/queries/` | Бизнес-запросы |
 | `sql/transactions/` | Многошаговая транзакция
 | `tests/` | Автоматические проверки схемы, данных и сценариев |
+| `generator/` | Генератор данных для третьей лабы и инструкция запуска |
 | `compose.yaml` | Сервисы PostgreSQL и проверок |
 | `run_checks.sql` | Запуск тестов с откатом изменений |
 | `run_demo.sql` | Загрузка данных и сценариев в основную базу |

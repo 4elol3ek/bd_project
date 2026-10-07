@@ -39,5 +39,37 @@ services:
     working_dir: /workspace
     entrypoint: [psql, -X, -v, ON_ERROR_STOP=1, -f, run_checks.sql]
 
+  queries:
+    image: postgres:18
+    profiles: [queries]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-news_aggregator}
+      PGUSER: ${POSTGRES_USER:-news_app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-news_local_password}
+    volumes:
+      - .:/workspace:ro
+    working_dir: /workspace
+    entrypoint: [psql, -X, -v, ON_ERROR_STOP=1, -f, run_queries.sql]
+  
+  seed_only:
+    image: postgres:18
+    profiles: [seed_only]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-news_aggregator}
+      PGUSER: ${POSTGRES_USER:-news_app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-news_local_password}
+    volumes:
+      - .:/workspace:ro
+    working_dir: /workspace
+    entrypoint: [psql, -X, -v, ON_ERROR_STOP=1, -f, run_seed_only.sql]
+    
 volumes:
   pgdata:
